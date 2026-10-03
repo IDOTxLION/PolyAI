@@ -1,0 +1,20 @@
+{
+  "id": "S-500_C-12_plan",
+  "source": "plan",
+  "fichier": "Projet1_S-500.pdf",
+  "feuillet": "S-500",
+  "page": 1,
+  "x": 412.5,
+  "y": 318.0,
+  "type_element": "colonne",
+  "element": "C-12",
+  "armature": [
+    {
+      "repere": "C12-1",
+      "diametre": "25M",
+      "quantite": 8,
+      "espacement_mm": null,
+      "longueur_mm": 3600
+    }
+  ]
+}
