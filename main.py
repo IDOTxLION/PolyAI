@@ -5,7 +5,7 @@ Usage : python main.py [plan.pdf] [dossier ou PDF des dessins d'atelier]
 
 La premiere forme extrait les elements du plan et des dessins d'atelier (JSON de
 l'annexe A, dans out/), les apparie, les compare et ecrit out/<projet>_rapport.pdf.
-La seconde repart de JSON deja extraits, par exemple ceux de handoff/.
+La seconde repart de JSON deja extraits.
 """
 
 import json
