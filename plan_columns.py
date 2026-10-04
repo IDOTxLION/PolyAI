@@ -46,12 +46,13 @@ def level_key(text):
     """Reduce a level name to a short key shared by plans and shop drawings.
 
     "REZ-DE-CHAUSSÉE" and "RDC" -> "RDC", "NIVEAU 2" and "NIV. 2" -> "N2", "SOUS-SOL" -> "SS",
-    "TOIT ..." -> "TOIT ...". Returns None when the text names no storey.
+    "SOUS-SOL S2" and "SS2" -> "SS2", "TOIT ..." -> "TOIT ...". Returns None when the text
+    names no storey.
     """
     plain = "".join(c for c in unicodedata.normalize("NFD", text.upper()) if unicodedata.category(c) != "Mn")
     if re.search(r"\bRDC\b|REZ.DE.CHAUSSEE", plain):
         return "RDC"
-    match = re.search(r"\bSOUS.?SOL\s*(\d*)|\bSS\s*(\d*)\b", plain)
+    match = re.search(r"\bSOUS.?SOL\s*S?(\d*)|\bSS\s*(\d*)\b", plain)
     if match:
         return "SS" + (match.group(1) or match.group(2) or "")
     match = re.search(r"\bNIV(?:EAU)?\.?\s*(\d+)", plain)
@@ -63,22 +64,56 @@ def level_key(text):
     return None
 
 
-def sheet_levels(doc):
-    """Return {level key: sheet number} for the column sheets (S-5xx) of a plan.
+def page_titles(doc):
+    """Return {page index: sheet title}, e.g. "S-501 - PLAN DES COLONNES - RDC".
 
-    The level comes from the sheet's bookmark, e.g. "S-501 - PLAN DES COLONNES - SOUS-SOL":
-    that sheet shows the columns standing on that level.
+    The title is the page's label. A plan exported without page labels carries it in its
+    bookmarks instead. A bookmark is believed only if its sheet number is written on the page
+    it points to; when it points to the wrong page, the title goes to the one page left
+    without a title that carries the number.
     """
-    levels = {}
+    titles = {page.number: page.get_label() for page in doc if SHEET.search(page.get_label() or "")}
+    if len(titles) == len(doc):
+        return titles
+    written = {page.number: {word[4].replace(" ", "") for word in page.get_text("words") if SHEET.fullmatch(word[4])}
+               for page in doc if page.number not in titles}
+    misplaced = []
     for _, title, page_number in doc.get_toc():
-        if not 1 <= page_number <= len(doc):
+        sheet = SHEET.search(title)
+        if not sheet:
             continue
-        sheet = SHEET.search(doc[page_number - 1].get_label() or "")
-        if not sheet or not COLUMN_SHEET.fullmatch(sheet.group()):
-            continue
+        number = sheet.group().replace(" ", "")
+        if number in written.get(page_number - 1, ()):
+            titles.setdefault(page_number - 1, title)
+        else:
+            misplaced.append((number, title))
+    for number, title in misplaced:
+        carriers = [index for index, numbers in written.items() if number in numbers and index not in titles]
+        if len(carriers) == 1:
+            titles[carriers[0]] = title
+    return titles
+
+
+def sheet_keys(doc):
+    """Return {sheet number: level key} for the column sheets (S-5xx) of a plan.
+
+    The level comes from the sheet's title, e.g. "S-501 - PLAN DES COLONNES - SOUS-SOL": that
+    sheet shows the columns standing on that level.
+    """
+    keys = {}
+    for _, title in sorted(page_titles(doc).items()):
+        sheet = SHEET.search(title)
         key = level_key(SHEET.sub("", title))
-        if key:
-            levels.setdefault(key, sheet.group().replace(" ", ""))
+        if COLUMN_SHEET.fullmatch(sheet.group()) and key:
+            keys.setdefault(sheet.group().replace(" ", ""), key)
+    return keys
+
+
+def sheet_levels(doc):
+    """Return {level key: sheet number}: the first column sheet of each level."""
+    levels = {}
+    for sheet, key in sheet_keys(doc).items():
+        levels.setdefault(key, sheet)
     return levels
 
 
@@ -87,14 +122,44 @@ def color_is(color, wanted):
 
 
 def find_tags(page):
-    """Return (box, text) of every column tag: a text block with an ARM.: line."""
-    tags = []
+    """Return (box, text) of every column tag: a "COL." line with its "ARM.:" line under it.
+
+    A tag is usually one text block. Some plans store every line as a block of its own: the
+    lines stacked under each "COL." line are then gathered into its tag.
+    """
+    tags, lines = [], []
     for block in page.get_text("dict")["blocks"]:
         if block["type"] != 0:
             continue
         text = "\n".join("".join(span["text"] for span in line["spans"]) for line in block["lines"])
         if "ARM.:" in text and "COL." in text:
             tags.append((pymupdf.Rect(block["bbox"]), text))
+        lines += [(pymupdf.Rect(line["bbox"]), "".join(span["text"] for span in line["spans"]).strip())
+                  for line in block["lines"]]
+    return tags or stacked_tags(page, [line for line in lines if line[1]])
+
+
+def stacked_tags(page, lines):
+    """Gather the tags of a page that stores them one line per block."""
+    to_displayed = page.rotation_matrix  # stacking is judged on the page as displayed
+    shown = [(box * to_displayed, box, text) for box, text in lines]
+    tags = []
+    for head, head_box, head_text in shown:
+        if not head_text.startswith("COL."):
+            continue
+        box, texts, last = pymupdf.Rect(head_box), [head_text], head
+        while len(texts) < 5:
+            under = [(s, b, t) for s, b, t in shown
+                     if last.y0 + 0.5 * last.height < s.y0 < last.y1 + last.height  # the next line down
+                     and min(s.x1, head.x1) - max(s.x0, head.x0) > 0.5 * min(s.width, head.width)
+                     and not t.startswith("COL.")]
+            if not under:
+                break
+            last, line_box, text = min(under, key=lambda item: item[0].y0)
+            box |= line_box
+            texts.append(text)
+        if any(text.startswith("ARM") for text in texts):
+            tags.append((box, "\n".join(texts)))
     return tags
 
 
@@ -220,16 +285,24 @@ def find_grid(page):
                 groups[-1].append(label)
             else:
                 groups.append([label])
-        groups = [group for group in groups if len(group) >= 6]
-        found = sorted((label[along], label[2]) for group in groups[:1] + groups[-1:] for label in group)
-        # One axis is lettered and the other numbered; stray text of the other kind is not a label.
-        lettered = sum(text[0].isalpha() for _, text in found) > len(found) / 2
+        # A row of bubbles normally holds many labels; a building with a short axis has few.
+        groups = [g for g in groups if len(g) >= 6] or [g for g in groups if len(g) >= 3]
+        axes.append(sorted((label[along], label[2]) for group in groups[:1] + groups[-1:] for label in group))
+
+    # One axis is lettered and the other numbered; stray text of the other kind is not a label.
+    # When both look alike, the axis with more labels is believed and the other is its opposite.
+    lettered = [sum(text[0].isalpha() for _, text in found) > len(found) / 2 for found in axes]
+    if lettered[0] == lettered[1]:
+        fuller = 0 if len(axes[0]) >= len(axes[1]) else 1
+        lettered[1 - fuller] = not lettered[fuller]
+    grid = []
+    for found, letters in zip(axes, lettered):
         lines = {}
         for position, text in found:  # the bubbles at both ends of a line give it twice
-            if text[0].isalpha() == lettered and (not lines or position - max(lines) > 8):
+            if text[0].isalpha() == letters and (not lines or position - max(lines) > 8):
                 lines[position] = text
-        axes.append(lines)
-    return axes[0], axes[1]
+        grid.append(lines)
+    return grid[0], grid[1]
 
 
 def label_order(label):
@@ -273,15 +346,12 @@ def grid_name(column, vertical, horizontal):
     return "-".join(name for name, _ in names), any(derived for _, derived in names)
 
 
-def extract_page(page, fichier):
-    """Return (records, counts, links) for one page of the plan.
+def extract_page(page, fichier, feuillet):
+    """Return (records, counts, links) for one page of the plan, the sheet `feuillet`.
 
     links holds (record, tag box, column box or None, name worked out between grid lines)
     per record, for drawing the check PDF and for reconciling names with the shop drawings.
     """
-    sheet = SHEET.search(page.get_label() or "")
-    feuillet = sheet.group().replace(" ", "") if sheet else f"p{page.number + 1}"
-
     tags = find_tags(page)
     columns, black = find_columns_and_lines(page)
     by_leader = follow_leaders(columns, tags, black)
@@ -317,10 +387,12 @@ def extract(pdf_path):
     """Return (records, counts per page, links per page index) for the column sheets (S-5xx) of a plan."""
     doc = pymupdf.open(pdf_path)
     records, report, links_by_page = [], {}, {}
+    titles = page_titles(doc)
     for page in doc:
-        if not COLUMN_SHEET.search(page.get_label() or ""):
+        sheet = COLUMN_SHEET.search(titles.get(page.number, ""))
+        if not sheet:
             continue
-        page_records, counts, links = extract_page(page, Path(pdf_path).name)
+        page_records, counts, links = extract_page(page, Path(pdf_path).name, sheet.group().replace(" ", ""))
         if counts["tags"]:
             records += page_records
             report[page.number + 1] = counts
