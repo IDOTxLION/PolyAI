@@ -113,13 +113,11 @@ def project_files(arguments):
     return plans[0], columns or [pdf for pdf in drawings if "colon" in pdf.name.lower()]
 
 
-def run(arguments):
-    """Extract one project, given as on the command line. Returns the paths of the two JSON files."""
-    plan_pdf, pdfs = project_files(arguments)
-    OUT_DIR.mkdir(exist_ok=True)
-    if not pdfs:
-        print(f"no column shop drawing found beside {plan_pdf}: give them after the plan on the command line")
+def extract(plan_pdf, pdfs):
+    """Return (plan records, shop-drawing records, names replaced) for the columns of one project.
 
+    Writes the check PDFs in out/.
+    """
     plan_records, plan_report, links_by_page = plan_columns.extract(plan_pdf)
     if not plan_records:
         print(f"no column tag found in {plan_pdf}: its S-500 sheets were not recognised")
@@ -135,13 +133,11 @@ def run(arguments):
             print(f"{name}: left out, its name does not tell which storey it details")
     renamed = reconcile_names([link for links in links_by_page.values() for link in links], atelier_records)
     plan_columns.write_check(plan_pdf, links_by_page, OUT_DIR / f"{plan_pdf.stem}_colonnes_check.pdf")
+    return plan_records, atelier_records, renamed
 
-    project = plan_pdf.stem.split("_")[-1]
-    plan_path = OUT_DIR / f"{project}_colonnes_plan.json"
-    atelier_path = OUT_DIR / f"{project}_colonnes_atelier.json"
-    write_json(plan_records, plan_path)
-    write_json(atelier_records, atelier_path)
 
+def print_sheets(plan_records, atelier_records):
+    """Print, per plan sheet, how many elements each side has and how many names they share."""
     plan_keys = Counter((r.feuillet, r.element) for r in plan_records)
     atelier_keys = Counter((r.feuillet, r.element) for r in atelier_records)
     print(f"{'sheet':<8}{'plan':>6}{'atelier':>9}{'paired':>8}{'plan only':>11}{'atelier only':>14}")
@@ -149,6 +145,23 @@ def run(arguments):
         plan = {name for s, name in plan_keys if s == sheet}
         atelier = {name for s, name in atelier_keys if s == sheet}
         print(f"{sheet:<8}{len(plan):>6}{len(atelier):>9}{len(plan & atelier):>8}{len(plan - atelier):>11}{len(atelier - plan):>14}")
+
+
+def run(arguments):
+    """Extract the columns of one project, given as on the command line. Returns the paths of the two JSON files."""
+    plan_pdf, pdfs = project_files(arguments)
+    OUT_DIR.mkdir(exist_ok=True)
+    if not pdfs:
+        print(f"no column shop drawing found beside {plan_pdf}: give them after the plan on the command line")
+    plan_records, atelier_records, renamed = extract(plan_pdf, pdfs)
+
+    project = plan_pdf.stem.split("_")[-1]
+    plan_path = OUT_DIR / f"{project}_colonnes_plan.json"
+    atelier_path = OUT_DIR / f"{project}_colonnes_atelier.json"
+    write_json(plan_records, plan_path)
+    write_json(atelier_records, atelier_path)
+
+    print_sheets(plan_records, atelier_records)
     unnamed = sum(1 for r in plan_records if r.element.startswith("?"))
     print(f"{len(plan_records)} plan records ({unnamed} without a name, {renamed} renamed after the shop drawings) -> {plan_path}")
     print(f"{len(atelier_records)} shop-drawing records -> {atelier_path}")

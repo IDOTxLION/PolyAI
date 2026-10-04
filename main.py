@@ -4,10 +4,11 @@ Usage : python main.py [dossier du projet]
         python main.py plan.pdf [dossier ou PDF des dessins d'atelier]
         python main.py plan.json atelier.json
 
-Les deux premieres formes extraient les colonnes du plan et des dessins d'atelier (JSON
-de l'annexe A, dans out/), les apparient, les comparent et ecrivent out/<projet>_rapport.pdf.
-Un dossier de projet contient le PDF du plan a sa racine et les dessins d'atelier dans des
-sous-dossiers. La troisieme forme repart de JSON deja extraits.
+Les deux premieres formes extraient les elements du plan et des dessins d'atelier
+(fondations, poutres, murs, colonnes, dalles : JSON de l'annexe A, dans out/), les apparient,
+les comparent et ecrivent out/<projet>_rapport.pdf. Un dossier de projet contient le PDF du
+plan a sa racine et les dessins d'atelier dans des sous-dossiers, un par type d'element. La
+troisieme forme repart de JSON deja extraits.
 """
 
 import json
@@ -30,9 +31,9 @@ def chemins_json(arguments: list[str]) -> tuple[Path, Path]:
     """Retourne les JSON plan et atelier : ceux donnes, sinon ceux extraits des PDF."""
     if len(arguments) == 2 and all(argument.endswith(".json") for argument in arguments):
         return Path(arguments[0]), Path(arguments[1])
-    import extract_columns  # charge PyMuPDF : inutile quand on repart des JSON
+    import extract_project  # charge PyMuPDF : inutile quand on repart des JSON
 
-    return extract_columns.run(arguments)
+    return extract_project.run(arguments)
 
 
 def charger(chemin: Path) -> list[Element]:

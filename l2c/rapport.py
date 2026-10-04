@@ -67,6 +67,11 @@ class FeuilletRapport:
     def compte(self, statut: str) -> int:
         return sum(1 for verdict in self.verdicts if verdict.statut == statut)
 
+    def types(self) -> list[str]:
+        """Les types d'element du feuillet (fondation, poutre, mur, colonne, dalle)."""
+        cartes = [verdict.paire.plan or verdict.paire.atelier for verdict in self.verdicts]
+        return sorted({carte.type_element for carte in cartes if carte is not None and carte.type_element})
+
     def sans_atelier(self) -> bool:
         """Vrai si aucun dessin d'atelier ne couvre ce feuillet : tout y est manquant."""
         return bool(self.verdicts) and all(verdict.statut == "manquant" for verdict in self.verdicts)
@@ -134,7 +139,8 @@ class Rapport:
         if not feuillets:
             story.append(Paragraph("Aucun element a rapporter.", corps))
         for bloc in feuillets:
-            story.append(Paragraph(escape(f"Feuillet {bloc.feuillet}"), feuillet_style))
+            types = f" ({', '.join(bloc.types())})" if bloc.types() else ""
+            story.append(Paragraph(escape(f"Feuillet {bloc.feuillet}{types}"), feuillet_style))
             story.append(
                 Paragraph(
                     f"Conformites : {bloc.nb_conformes}"
@@ -204,6 +210,7 @@ class Rapport:
         barres = Comparateur().juger_barres(
             list(plan.armature) if plan is not None else [],
             list(atelier.armature) if atelier is not None else [],
+            (plan or atelier).type_element if seul is not None and (plan or atelier) else "colonne",
         )
         if not barres:
             barres = [(None, None, [])]
