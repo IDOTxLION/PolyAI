@@ -109,9 +109,11 @@ class Comparateur:
         est mis en face du groupe atelier le plus proche, donc l'ecart
         35M vs 25M ne disparait pas.
         """
+        goujons = [b for b in armature_atelier if str(b.repere).upper().startswith("GOUJ")]
+        armature_atelier = [b for b in armature_atelier if not any(b is g for g in goujons)]
         comptees_plan, espacees_plan = self.regrouper(armature_plan)
         comptees_atelier, espacees_atelier = self.regrouper(armature_atelier)
-        details = [b for b in comptees_atelier if self.est_detail(b, armature_plan)]
+        details = goujons + [b for b in comptees_atelier if self.est_detail(b, armature_plan)]
         comptees_atelier = [
             b for b in comptees_atelier if not self.est_detail(b, armature_plan)
         ]
@@ -159,7 +161,8 @@ class Comparateur:
         """Met chaque groupe du plan en face de son jumeau atelier.
 
         1. meme diametre et meme espacement ;
-        2. meme diametre, autre espacement (ex. une zone d'etriers differente) ;
+        2. meme diametre, autre espacement : l'espacement du plan se compare au plus
+           grand de l'atelier, les zones plus serrees restent seules (voir est_detail) ;
         3. sinon le groupe restant le plus proche en diametre.
         Ce qui reste seul d'un cote sort avec None en face.
         """
@@ -176,10 +179,12 @@ class Comparateur:
                 seuls_plan = [b for b in seuls_plan if b is not barre]
                 seuls_atelier = [a for a in seuls_atelier if a is not jumelle]
 
-        for barre in list(seuls_atelier):
+        for barre in sorted(seuls_atelier, key=lambda a: -(a.espacement_mm or 0)):
             memes = [b for b in plan if _diametre(b) == _diametre(barre)]
-            if memes:
-                proche = min(memes, key=lambda b: self.distance(b, barre))
+            libres = [b for b in memes if any(b is s for s in seuls_plan)]
+            plus_large = [b for b in memes if (barre.espacement_mm or 0) > (b.espacement_mm or 0)]
+            if libres or plus_large:
+                proche = min(libres or plus_large, key=lambda b: self.distance(b, barre))
                 paires.append((proche, barre))
                 seuls_plan = [b for b in seuls_plan if b is not proche]
                 seuls_atelier = [a for a in seuls_atelier if a is not barre]
@@ -208,17 +213,25 @@ class Comparateur:
         )
 
     def est_detail(self, barre_atelier: Barre | None, armature_plan: list[Barre]) -> bool:
-        """Barres comptees a l'atelier que le plan ne donne que par espacement.
+        """Barres de l'atelier qui detaillent ce que le plan resume. Listees, pas jugees.
 
-        Ex. les etriers dans l'epaisseur de la dalle : l'atelier les compte
-        (3 x 10M), le plan dit seulement 10M@6". Listees, pas jugees.
+        - Barres comptees que le plan ne donne que par espacement, ex. les etriers
+          dans l'epaisseur de la dalle : l'atelier les compte (3 x 10M), le plan
+          dit seulement 10M@6".
+        - Zone d'etriers plus serree que l'espacement du plan (extremites d'une
+          colonne) : elle le respecte.
+        - Goujons : le plan les demande ("+GOUJ.") sans en donner le nombre.
         """
-        if barre_atelier is None or barre_atelier.espacement_mm is not None:
+        if barre_atelier is None:
             return False
-        espacees = {_diametre(b) for b in armature_plan if b.espacement_mm is not None}
-        comptees = {_diametre(b) for b in armature_plan if b.espacement_mm is None}
+        if str(barre_atelier.repere).upper().startswith("GOUJ"):
+            return True
         diametre = _diametre(barre_atelier)
-        return diametre in espacees and diametre not in comptees
+        espacees = [b for b in armature_plan if b.espacement_mm is not None and _diametre(b) == diametre]
+        if barre_atelier.espacement_mm is not None:
+            return any(barre_atelier.espacement_mm < b.espacement_mm for b in espacees)
+        comptees = {_diametre(b) for b in armature_plan if b.espacement_mm is None}
+        return bool(espacees) and diametre not in comptees
 
     def comparer_barre(
         self,
@@ -422,6 +435,24 @@ class TestComparateur(unittest.TestCase):
         )
         verdict = self.cmp.comparer_paire(_paire(plan, atelier))
         self.assertEqual([(e.champ, e.valeur_plan, e.valeur_atelier) for e in verdict.ecarts], [("espacement_mm", 152, 305)])
+
+    def test_goujons_listes_mais_pas_comptes(self) -> None:
+        plan = _element("plan", [_barre(quantite=4, longueur_mm=None)])
+        goujons = Barre(repere="GOUJ", diametre="25M", quantite=4, espacement_mm=None, longueur_mm=1200)
+        atelier = _element("atelier", [_barre(quantite=4), goujons])
+        verdict = self.cmp.comparer_paire(_paire(plan, atelier))
+        self.assertEqual(verdict.statut, "conforme")
+        self.assertEqual(len(self.cmp.apparier_barres(plan.armature, atelier.armature)), 2)
+
+    def test_zone_d_etriers_plus_serree_pas_signalee(self) -> None:
+        plan = _element("plan", [_barre(diametre="10M", quantite=None, espacement_mm=300, longueur_mm=None)])
+        serree = _barre(diametre="10M", quantite=3, espacement_mm=150, longueur_mm=None)
+        courante = _barre(diametre="10M", quantite=8, espacement_mm=300, longueur_mm=None)
+        verdict = self.cmp.comparer_paire(_paire(plan, _element("atelier", [serree, courante])))
+        self.assertEqual(verdict.statut, "conforme")
+        # rien qu'une zone serree : l'espacement du plan n'est nulle part
+        verdict = self.cmp.comparer_paire(_paire(plan, _element("atelier", [serree])))
+        self.assertEqual([(e.champ, e.valeur_plan, e.valeur_atelier) for e in verdict.ecarts], [("espacement_mm", 300, 150)])
 
     def test_barre_du_plan_absente_de_l_atelier(self) -> None:
         plan = _element(
