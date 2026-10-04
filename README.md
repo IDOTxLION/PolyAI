@@ -15,8 +15,9 @@ python -m venv .venv
 .venv/bin/pip install -r requirements.txt
 ```
 
-The OCR models ship inside the `rapidocr` package, so nothing is downloaded at run time. With a
-CUDA build of PyTorch installed, OCR runs on the GPU, about 10 times faster.
+`main.py` needs nothing more. The OCR tools download the pretrained models (about 140 MB) the
+first time they run, then work offline. They are slow without a GPU, more than ten minutes for
+a large sheet; with a CUDA build of PyTorch installed, a sheet takes about half a minute.
 
 ## Run
 
