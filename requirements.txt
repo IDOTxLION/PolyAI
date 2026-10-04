@@ -4,5 +4,9 @@ pydantic
 rapidocr
 onnxruntime
 reportlab>=4.0
+# For demo.ipynb only:
+notebook
+pandas
+matplotlib
 # Optional: with a CUDA build of PyTorch installed, OCR runs on the GPU (about 10x faster).
 # torch
