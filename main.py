@@ -4,7 +4,7 @@ Usage : python main.py [dossier du projet]
         python main.py plan.pdf [dossier ou PDF des dessins d'atelier]
         python main.py plan.json atelier.json
 
-Les deux premieres formes extraient les elements du plan et des dessins d'atelier (JSON
+Les deux premieres formes extraient les colonnes du plan et des dessins d'atelier (JSON
 de l'annexe A, dans out/), les apparient, les comparent et ecrivent out/<projet>_rapport.pdf.
 Un dossier de projet contient le PDF du plan a sa racine et les dessins d'atelier dans des
 sous-dossiers. La troisieme forme repart de JSON deja extraits.
@@ -60,26 +60,6 @@ def main() -> None:
         rapport = SORTIE / f"{chemin_plan.stem.split('_')[0]}_rapport.pdf"
         Rapport(verdicts).ecrire_pdf(rapport)
         log.info("rapport ecrit dans %s", rapport)
-        if not (len(sys.argv[1:]) == 2 and all(argument.endswith(".json") for argument in sys.argv[1:])):
-            import extract_series
-
-            for series, (plan_path, atelier_path, plan_count, atelier_count) in extract_series.run_all(
-                sys.argv[1:], SORTIE
-            ).items():
-                plan_series = charger(plan_path)
-                atelier_series = charger(atelier_path)
-                series_verdicts = Comparateur().comparer_paires(
-                    Apparieur(plan_series + atelier_series).apparier()
-                )
-                series_report = SORTIE / f"{chemin_plan.stem.split('_')[0]}_{series.replace('-', '')}_rapport.pdf"
-                Rapport(series_verdicts).ecrire_pdf(series_report)
-                log.info(
-                    "%s: %s plan, %s atelier -> %s",
-                    series,
-                    plan_count,
-                    atelier_count,
-                    series_report,
-                )
     except FileNotFoundError:
         log.exception("fichier introuvable")
         sys.exit(1)
