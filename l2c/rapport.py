@@ -67,6 +67,10 @@ class FeuilletRapport:
     def compte(self, statut: str) -> int:
         return sum(1 for verdict in self.verdicts if verdict.statut == statut)
 
+    def sans_atelier(self) -> bool:
+        """Vrai si aucun dessin d'atelier ne couvre ce feuillet : tout y est manquant."""
+        return bool(self.verdicts) and all(verdict.statut == "manquant" for verdict in self.verdicts)
+
 
 class Rapport:
     """Construit le rapport a partir des verdicts du Comparateur."""
@@ -141,7 +145,14 @@ class Rapport:
                     corps,
                 )
             )
-            if bloc.a_signaler():
+            if bloc.sans_atelier():
+                story.append(
+                    Paragraph(
+                        "Aucun dessin d'atelier lu pour ce feuillet : tous ses elements sont manquants.",
+                        corps,
+                    )
+                )
+            elif bloc.a_signaler():
                 story.append(Spacer(1, 0.08 * inch))
                 story.append(self._tableau(bloc, cellule))
         SimpleDocTemplate(
@@ -367,6 +378,18 @@ class TestRapport(unittest.TestCase):
         )
         tableau = rapport._tableau(rapport.par_feuillet()[0], getSampleStyleSheet()["Normal"])
         self.assertEqual(tableau._nrows, 2)  # l'entete et l'element manquant
+
+    def test_feuillet_sans_dessin_d_atelier(self) -> None:
+        rapport = Rapport(
+            [
+                _verdict("manquant", element="C-12", avec_atelier=False),
+                _verdict("manquant", element="D-22", avec_atelier=False),
+                _verdict("conforme", feuillet="S-501", element="C-12"),
+            ]
+        )
+        blocs = {bloc.feuillet: bloc for bloc in rapport.par_feuillet()}
+        self.assertTrue(blocs["S-500"].sans_atelier())
+        self.assertFalse(blocs["S-501"].sans_atelier())
 
     def test_pdf_contient_le_feuillet_et_l_ecart(self) -> None:
         from tempfile import TemporaryDirectory
