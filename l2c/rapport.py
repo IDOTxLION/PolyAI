@@ -64,6 +64,9 @@ class FeuilletRapport:
     def a_signaler(self) -> list[Verdict]:
         return [verdict for verdict in self.verdicts if verdict.statut != "conforme"]
 
+    def compte(self, statut: str) -> int:
+        return sum(1 for verdict in self.verdicts if verdict.statut == statut)
+
 
 class Rapport:
     """Construit le rapport a partir des verdicts du Comparateur."""
@@ -117,7 +120,9 @@ class Rapport:
         story = [Paragraph("Rapport de conformite des armatures", titre)]
         story.append(
             Paragraph(
-                "Chaque champ d'armature affiche la valeur du plan, puis celle de l'atelier.",
+                "Seuls les elements a signaler sont detailles. Chaque champ d'armature"
+                " affiche la valeur du plan, puis celle de l'atelier ; les valeurs en"
+                " ecart sont en rouge.",
                 corps,
             )
         )
@@ -129,12 +134,16 @@ class Rapport:
             story.append(
                 Paragraph(
                     f"Conformites : {bloc.nb_conformes}"
-                    f" &nbsp;&nbsp; Non-conformites : {bloc.nb_non_conformes}",
+                    f" &nbsp;&nbsp; Non-conformites : {bloc.nb_non_conformes}"
+                    f" (non conformes : {bloc.compte('non_conforme')},"
+                    f" manquants a l'atelier : {bloc.compte('manquant')},"
+                    f" ajoutes a l'atelier : {bloc.compte('ajoute')})",
                     corps,
                 )
             )
-            story.append(Spacer(1, 0.08 * inch))
-            story.append(self._tableau(bloc, cellule))
+            if bloc.a_signaler():
+                story.append(Spacer(1, 0.08 * inch))
+                story.append(self._tableau(bloc, cellule))
         SimpleDocTemplate(
             str(chemin),
             pagesize=landscape(letter),
@@ -145,14 +154,15 @@ class Rapport:
 
     def _tableau(self, bloc: FeuilletRapport, style: ParagraphStyle) -> Table:
         lignes = [[Paragraph(escape(colonne), style) for colonne in COLONNES]]
-        statuts_ligne = ["entete"]
-        for verdict in bloc.verdicts:
-            for ligne in self._lignes(verdict):
-                lignes.append([Paragraph(escape(valeur), style) for valeur in ligne])
-                statuts_ligne.append(verdict.statut)
+        lignes_en_ecart: list[int] = []
+        for verdict in bloc.a_signaler():
+            for cellules, en_ecart in self._lignes(verdict):
+                if en_ecart:
+                    lignes_en_ecart.append(len(lignes))
+                lignes.append([Paragraph(cellule, style) for cellule in cellules])
         tableau = Table(
             lignes,
-            colWidths=[78, 100, 100, 62, 58, 52, 72, 62, 58],
+            colWidths=[60, 118, 118, 62, 58, 52, 72, 62, 58],
             repeatRows=1,
         )
         commandes = [
@@ -164,47 +174,73 @@ class Rapport:
             ("TOPPADDING", (0, 0), (-1, -1), 3),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ]
-        for index, statut in enumerate(statuts_ligne):
-            if statut != "conforme" and statut != "entete":
-                commandes.append(
-                    ("BACKGROUND", (0, index), (-1, index), colors.Color(1, 0.93, 0.93))
-                )
+        for index in lignes_en_ecart:
+            commandes.append(
+                ("BACKGROUND", (0, index), (-1, index), colors.Color(1, 0.93, 0.93))
+            )
         tableau.setStyle(TableStyle(commandes))
         return tableau
 
-    def _lignes(self, verdict: Verdict) -> list[list[str]]:
+    def _lignes(self, verdict: Verdict) -> list[tuple[list[str], bool]]:
+        """Une ligne par barre : ses cellules, et si la ligne est a signaler.
+
+        Element apparie : seules les barres en ecart sont a signaler, leurs
+        valeurs en ecart en rouge. Element manquant ou ajoute : toutes ses barres.
+        """
         plan = verdict.paire.plan
         atelier = verdict.paire.atelier
-        etiquette = self._etiquette(verdict)
-        nom_plan = plan.fichier if plan is not None else "x"
-        nom_atelier = atelier.fichier if atelier is not None else "x"
-        barres = Comparateur().apparier_barres(
+        seul = plan is None or atelier is None
+        barres = Comparateur().juger_barres(
             list(plan.armature) if plan is not None else [],
             list(atelier.armature) if atelier is not None else [],
         )
         if not barres:
-            barres = [(None, None)]
-        return [
-            [
-                etiquette,
-                nom_plan,
-                nom_atelier,
-                *[self._champ(barre_plan, barre_atelier, champ) for champ in CHAMPS_BARRE],
-                verdict.statut,
+            barres = [(None, None, [])]
+        lignes: list[tuple[list[str], bool]] = []
+        for barre_plan, barre_atelier, ecarts in barres:
+            champs = set() if seul else {ecart.champ for ecart in ecarts}
+            cellules = [
+                escape(self._etiquette(verdict)),
+                escape(self._origine(plan)),
+                escape(self._origine(atelier)),
+                *[
+                    self._champ(
+                        barre_plan,
+                        barre_atelier,
+                        champ,
+                        champ in champs or "barre" in champs,
+                    )
+                    for champ in CHAMPS_BARRE
+                ],
+                escape(verdict.statut),
             ]
-            for barre_plan, barre_atelier in barres
-        ]
+            lignes.append((cellules, seul or bool(champs)))
+        return lignes
 
     def _etiquette(self, verdict: Verdict) -> str:
         carte = verdict.paire.plan or verdict.paire.atelier
         nom = carte.element if carte is not None else verdict.paire.etiquette.element
-        feuillet = self._feuillet(verdict)
-        if carte is None:
-            return f"{feuillet} {nom}"
-        return f"{feuillet} {nom} | page {carte.page}, x {carte.x}, y {carte.y}"
+        return f"{self._feuillet(verdict)} {nom}"
 
-    def _champ(self, barre_plan: Barre | None, barre_atelier: Barre | None, champ: str) -> str:
-        return f"{self._valeur(barre_plan, champ)} | {self._valeur(barre_atelier, champ)}"
+    def _origine(self, carte: Element | None) -> str:
+        """Ou retrouver l'element : fichier, page, x, y."""
+        if carte is None:
+            return "x"
+        return f"{carte.fichier} | page {carte.page}, x {carte.x}, y {carte.y}"
+
+    def _champ(
+        self,
+        barre_plan: Barre | None,
+        barre_atelier: Barre | None,
+        champ: str,
+        en_ecart: bool = False,
+    ) -> str:
+        texte = escape(
+            f"{self._valeur(barre_plan, champ)} | {self._valeur(barre_atelier, champ)}"
+        )
+        if en_ecart:
+            return f'<font color="#c00000"><b>{texte}</b></font>'
+        return texte
 
     def _valeur(self, barre: Barre | None, champ: str) -> str:
         if barre is None:
@@ -307,6 +343,30 @@ class TestRapport(unittest.TestCase):
         bloc = rapport.par_feuillet()[0]
         self.assertEqual(bloc.feuillet, "S-400")
         self.assertEqual(bloc.nb_non_conformes, 1)
+
+    def test_seule_la_valeur_en_ecart_est_marquee(self) -> None:
+        verdict = _verdict(
+            "non_conforme",
+            armature_plan=[Barre("", "25M", 9, None, None), Barre("", "10M", None, 152, None)],
+            armature_atelier=[Barre("A", "25M", 11, None, 2400), Barre("B", "10M", 14, 152, None)],
+        )
+        (barres, en_ecart), (etriers, etriers_en_ecart) = Rapport([verdict])._lignes(verdict)
+        marquees = [cellule for cellule in barres if "<b>" in cellule]
+        self.assertTrue(en_ecart)
+        self.assertEqual(len(marquees), 1)
+        self.assertIn("9 | 11", marquees[0])
+        self.assertFalse(etriers_en_ecart)
+        self.assertFalse(any("<b>" in cellule for cellule in etriers))
+
+    def test_les_elements_conformes_ne_sont_pas_detailles(self) -> None:
+        rapport = Rapport(
+            [
+                _verdict("conforme", element="C-12"),
+                _verdict("manquant", element="D-22", avec_atelier=False),
+            ]
+        )
+        tableau = rapport._tableau(rapport.par_feuillet()[0], getSampleStyleSheet()["Normal"])
+        self.assertEqual(tableau._nrows, 2)  # l'entete et l'element manquant
 
     def test_pdf_contient_le_feuillet_et_l_ecart(self) -> None:
         from tempfile import TemporaryDirectory
