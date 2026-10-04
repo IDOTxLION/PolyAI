@@ -23,6 +23,8 @@ def line(x, y, text, width=60, height=8):
 class TestLevels(unittest.TestCase):
     def test_level_key_is_shared_by_plan_titles_and_shop_labels(self):
         self.assertEqual(plan_columns.level_key("PLAN DES COLONNES - REZ-DE-CHAUSSÉE"), "RDC")
+        garbled = r"S-502 - PLAN DES COLONNES - REZ-DE-CHAUSS\311E\000"  # a page label left with its octal escapes
+        self.assertEqual(plan_columns.level_key(plan_columns.clean_label(garbled)), "RDC")
         self.assertEqual(plan_columns.level_key("PLAN DES COLONNES - NIVEAU 12"), "N12")
         self.assertEqual(plan_columns.level_key("NIV. 3"), "N3")
         self.assertEqual(plan_columns.level_key("PLAN DES COLONNES - SOUS-SOL"), "SS")

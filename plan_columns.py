@@ -64,6 +64,11 @@ def level_key(text):
     return None
 
 
+def clean_label(label):
+    """A page label as text: some PDFs leave its accented letters as octal escapes ("CHAUSS\\311E")."""
+    return re.sub(r"\\(\d{3})", lambda escape: chr(int(escape.group(1), 8)), label or "").replace("\x00", "")
+
+
 def page_titles(doc):
     """Return {page index: sheet title}, e.g. "S-501 - PLAN DES COLONNES - RDC".
 
@@ -72,7 +77,7 @@ def page_titles(doc):
     it points to; when it points to the wrong page, the title goes to the one page left
     without a title that carries the number.
     """
-    titles = {page.number: page.get_label() for page in doc if SHEET.search(page.get_label() or "")}
+    titles = {page.number: clean_label(page.get_label()) for page in doc if SHEET.search(page.get_label() or "")}
     if len(titles) == len(doc):
         return titles
     written = {page.number: {word[4].replace(" ", "") for word in page.get_text("words") if SHEET.fullmatch(word[4])}
