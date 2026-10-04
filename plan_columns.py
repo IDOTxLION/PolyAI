@@ -404,7 +404,10 @@ def write_check(pdf_path, links_by_page, out_path):
     """Save the column sheets with each column's name beside it and a line to its tag.
 
     Blue = named from the grid, orange = name worked out between two grid lines, red = no name.
+    Nothing is written when the plan has no column sheet.
     """
+    if not links_by_page:
+        return
     doc = pymupdf.open(pdf_path)
     for page_index, links in links_by_page.items():
         page = doc[page_index]

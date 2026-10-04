@@ -74,6 +74,8 @@ def project_files(arguments):
     named after columns under it, else every PDF named after columns.
     """
     first = Path(arguments[0]) if arguments else plan_columns.DEFAULT_PDF
+    if not first.exists():
+        sys.exit(f"{first}: no such file or folder")
     if len(arguments) > 1:
         return first, atelier_columns.atelier_pdfs(arguments[1:])
     project = first if first.is_dir() else first.parent
@@ -89,8 +91,12 @@ def run(arguments):
     """Extract one project, given as on the command line. Returns the paths of the two JSON files."""
     plan_pdf, pdfs = project_files(arguments)
     OUT_DIR.mkdir(exist_ok=True)
+    if not pdfs:
+        print(f"no column shop drawing found beside {plan_pdf}: give them after the plan on the command line")
 
     plan_records, plan_report, links_by_page = plan_columns.extract(plan_pdf)
+    if not plan_records:
+        print(f"no column tag found in {plan_pdf}: its S-500 sheets were not recognised")
     # Storey tables first; the drawings that hold none are read as one detail per column.
     atelier_records, atelier_report = atelier_columns.extract(pdfs, plan_pdf, check_dir=OUT_DIR)
     tabled = {name for name, counts in atelier_report.items() if counts.get("records")}
