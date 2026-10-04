@@ -1,8 +1,8 @@
 # From Plans to Shop Drawings
 
 Checks reinforcement shop drawings against the structural plans. From a project's PDFs it
-extracts each column's reinforcement into JSON (Appendix A of the brief), matches every plan
-element to its shop-drawing equivalent, compares them, and writes a PDF report by plan sheet.
+extracts reinforcement into JSON (Appendix A of the brief), matches plan elements to their
+shop-drawing equivalents, compares them, and writes PDF reports by plan sheet.
 
 Everything runs locally. No document is sent to a cloud service or an external API.
 
@@ -32,6 +32,12 @@ shop-drawing PDFs or folders works too (`python main.py plan.pdf drawings/`). It
 | `<project>_colonnes_atelier.json` | one record per column and storey found on the shop drawings |
 | `<project>_rapport.pdf` | the report: counts per plan sheet, and the detail of every element to flag |
 | `*_colonnes_check.pdf` | the source PDFs with what was extracted drawn on top, to check by eye |
+
+The same command also writes one JSON pair and one report for each non-column series:
+`<project>_S100_*`, `<project>_S300_*`, `<project>_S400_*`, and `<project>_S600_*`.
+These series use a conservative, label-and-nearby-text extractor because their drawing
+layouts vary more than the column layouts. Records without readable reinforcement are not
+invented; the reports expose the resulting missing or uncertain cases for engineer review.
 
 A project whose drawings carry a text layer takes a few seconds. Drawings without one are read
 by OCR, about half a minute per sheet on a GPU and far longer without; each sheet is read once
@@ -64,7 +70,7 @@ Each project takes 4 to 7 seconds once its drawings have been read by OCR.
 
 | Step | Module | What it does |
 |---|---|---|
-| Plan extraction | `plan_columns.py` | Finds the column tags on the S-500 sheets, follows each leader line to its column, and names the column after the grid lines it stands on. |
+| Plan extraction | `plan_columns.py`, `extract_series.py` | Finds column tags on S-500 sheets with the specialised reader, and labelled elements on S-100/S-300/S-400/S-600 sheets with the conservative generic reader. |
 | Shop drawings, storey tables | `atelier_columns.py` | Reads a fabricator's table of columns by storey: one record per column and storey. |
 | Shop drawings, details | `atelier_details.py` | Reads drawings that detail one column per block, from the text layer or from OCR. |
 | Orchestration | `extract_columns.py` | Runs the plan and both shop-drawing readers, reconciles the names of columns that stand between grid lines, writes the JSON. |
@@ -151,7 +157,9 @@ They run on invented data and need none of the project documents. One report tes
 
 ## Known limitations
 
-- Only columns (S-500) are extracted. Foundations, beams, shear walls and slabs are not.
+- The specialised high-recall extraction is for columns (S-500). Foundations, beams, shear
+  walls and slabs now have a conservative generic extraction, but their layouts vary between
+  fabricators and those reports require engineer review.
 - A sheet of details is filed under a plan sheet from the storey in its file name; a drawing
   whose name tells no storey is left out.
 - A column is matched by its name. When the plan's name and the fabricator's differ (a column
