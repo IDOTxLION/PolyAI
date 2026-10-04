@@ -34,7 +34,7 @@ BARS = re.compile(r"(\d+)\s*-\s*(\d{2}M)")  # "4-25M": quantity and diameter
 TIES = re.compile(rf"(\d{{2}}M)\s*@\s*(\d+(?:\.\d+)?)\s*({INCH})?")  # '10M@6"': diameter and spacing
 SHEET = re.compile(r"S-?\s?\d{3}")
 COLUMN_SHEET = re.compile(r"S-?\s?5\d\d")  # the S-500 series holds the columns
-GRID_LABEL = re.compile(r"[A-Z](\.\d)?|\d{1,2}(\.\d)?")
+GRID_LABEL = re.compile(r"([A-Z])\1?(\.\d)?|\d{1,2}(\.\d)?[A-Z]?")  # "B", "BB", "B.5", "12", "12.5", "16E"
 
 ON_GRID = 20  # points: a column this close to a grid line stands on it
 MAX_LEADER_HOPS = 4  # a leader line is drawn as a few connected segments
@@ -306,9 +306,10 @@ def find_grid(page):
 
 
 def label_order(label):
-    """Sort key putting grid labels in their natural order: A, B, B.5, C or 1, 2, 2.5, 10."""
-    head, _, decimal = label.partition(".")
-    return (int(head) if head.isdigit() else ord(head), int(decimal or 0))
+    """Sort key putting grid labels in their natural order: A, B, B.5, C, AA, BB or 1, 2, 2.5, 10."""
+    wing = label[-1] if label[0].isdigit() and label[-1].isalpha() else ""  # "16.9E": a line of the east wing
+    head, _, decimal = label.removesuffix(wing).partition(".")
+    return (wing, int(head) if head.isdigit() else len(head) * 100 + ord(head[0]), int(decimal or 0))
 
 
 def line_name(position, lines):

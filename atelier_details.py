@@ -31,7 +31,8 @@ from schema import Armature, Element
 OCR_CACHE = OUT_DIR / "ocr_cache"  # OCR takes half a minute a page: each page is read once
 MIN_EMBEDDED_WORDS = 20  # fewer than this and the page is treated as having no text layer
 
-NAME = re.compile(r"([A-Z]{1,2}(?:\.\d)?)\s*[-/]\s*(\d{1,2}(?:\.\d)?)")  # "C-12", "C/12", "B.5-7"
+NAME = re.compile(r"([A-Z]{1,2}(?:\.\d)?)\s*[-/]\s*(\d{1,2}(?:\.\d)?[A-Z]?)")  # "C-12", "C/12", "B.5-7", "DD-16E"
+POSITION = re.compile(r"COL\s*:\s*(.+)")  # "COL : BB - 15": where a column the fabricator numbers itself stands
 SIZES = r"(?:10|15|20|25|30|35|45|55)M"  # the metric bar sizes
 BAR = re.compile(rf"(?:(\d+)\s*[xX]\s*)?(\d+?)\s*({SIZES})\b\s*([^\s@]+)?")  # [columns x] quantity diameter [mark]
 LOOSE_BAR = re.compile(rf"^({SIZES})\s+([^\s@]+)")  # a tie given without its quantity: "10M 10MT1"
@@ -112,8 +113,8 @@ def find_names(lines):
 
 
 def is_content(text):
-    """True if a line carries reinforcement: a bar or a spacing."""
-    return bool(BAR.search(text) or LOOSE_BAR.match(text.strip()) or SPACING.search(text))
+    """True if a line belongs to a detail: a bar, a spacing, or the column's position on the grid."""
+    return bool(BAR.search(text) or LOOSE_BAR.match(text.strip()) or SPACING.search(text) or POSITION.fullmatch(text.strip()))
 
 
 def share_lines(lines, names):
@@ -242,6 +243,7 @@ def extract_page(pdf_path, page, feuillet):
     names = find_names(lines)
     shared = share_lines(lines, names)
     counts = Counter(names=len(names), details=len(shared))
+
     records, drawn = [], []
     for index, found in sorted(shared.items()):
         armature = parse_detail(found)
@@ -251,13 +253,17 @@ def extract_page(pdf_path, page, feuillet):
         for box, _ in found:
             area |= box
         centre = (area.tl + area.br) / 2
-        for name in names[index][1]:  # a detail drawn once for several columns gives a record to each
+        # A fabricator that numbers its columns ("C-07") also writes where each one stands on the
+        # grid ("COL : BB - 15"). That position is the name the plan knows: it replaces the title's.
+        positions = [names_in(POSITION.fullmatch(text.strip()).group(1)) for _, text in found if POSITION.fullmatch(text.strip())]
+        placed = [where[0] for where in positions if len(where) == 1]
+        for name in placed[:1] or names[index][1]:  # a detail drawn for several columns gives a record to each
             records.append(Element(
                 id=f"{feuillet}_{name}_atelier", source="atelier", fichier=Path(pdf_path).name, feuillet=feuillet,
                 page=page.number + 1, x=round(centre.x, 1), y=round(centre.y, 1),
                 type_element="colonne", element=name, armature=armature,
             ))
-        drawn.append((f"{', '.join(names[index][1])} {feuillet}", area | names[index][0]))
+        drawn.append((f"{', '.join(placed[:1] or names[index][1])} {feuillet}", area | names[index][0]))
     counts["records"] = len(records)
     return records, counts, drawn
 

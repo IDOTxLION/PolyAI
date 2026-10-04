@@ -19,6 +19,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+import pymupdf
+
 import atelier_columns
 import atelier_details
 import plan_columns
@@ -62,6 +64,30 @@ def reconcile_names(plan_links, atelier_records):
     return renamed
 
 
+def refile(atelier_records, plan_records, plan_pdf):
+    """File shop-drawing records under the right sheet when a storey is drawn on several.
+
+    A plan can split a storey over two sheets (zones A and B). A shop-drawing record is filed
+    under the first of them; it moves to the sheet of the same storey whose plan has that
+    column. Returns the number of records moved.
+    """
+    keys = plan_columns.sheet_keys(pymupdf.open(plan_pdf))
+    on_plan = {(record.feuillet, record.element) for record in plan_records}
+    taken = {(record.feuillet, record.element) for record in atelier_records}
+    moved = 0
+    for record in atelier_records:
+        if (record.feuillet, record.element) in on_plan:
+            continue
+        siblings = [sheet for sheet, key in keys.items() if key == keys.get(record.feuillet) and sheet != record.feuillet]
+        homes = [sheet for sheet in siblings if (sheet, record.element) in on_plan and (sheet, record.element) not in taken]
+        if len(homes) == 1:
+            taken.add((homes[0], record.element))
+            record.feuillet = homes[0]
+            record.id = f"{homes[0]}_{record.element}_atelier"
+            moved += 1
+    return moved
+
+
 def write_json(records, path):
     path.write_text(json.dumps([record.model_dump() for record in records], ensure_ascii=False, indent=1), encoding="utf8")
 
@@ -103,6 +129,7 @@ def run(arguments):
     details, details_report = atelier_details.extract([pdf for pdf in pdfs if pdf.name not in tabled], plan_pdf,
                                                       check_dir=OUT_DIR)
     atelier_records += details
+    refile(atelier_records, plan_records, plan_pdf)
     for name, counts in details_report.items():
         if counts["sheet"] is None:
             print(f"{name}: left out, its name does not tell which storey it details")
