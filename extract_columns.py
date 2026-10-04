@@ -5,7 +5,9 @@ A column has the same `feuillet` and `element` in both files, so the two sides p
 those two fields: `feuillet` is the plan sheet of the storey the column stands on, `element`
 is the column's name ("A-6").
 
-Usage: python extract_columns.py [plan.pdf] [folder or PDFs of column shop drawings]
+Usage: python extract_columns.py [project folder]
+       python extract_columns.py plan.pdf [folder or PDFs of column shop drawings]
+A project folder holds the plan PDF at its top and the shop drawings in folders under it.
 Writes, in out/:
     <project>_colonnes_plan.json and <project>_colonnes_atelier.json   the records
     <plan name>_colonnes_check.pdf, <shop drawing name>_colonnes_check.pdf   to check by eye
@@ -18,6 +20,7 @@ from collections import Counter
 from pathlib import Path
 
 import atelier_columns
+import atelier_details
 import plan_columns
 from plan_columns import OUT_DIR
 
@@ -63,14 +66,40 @@ def write_json(records, path):
     path.write_text(json.dumps([record.model_dump() for record in records], ensure_ascii=False, indent=1), encoding="utf8")
 
 
+def project_files(arguments):
+    """Return (plan PDF, PDFs of the column shop drawings) from the command-line arguments.
+
+    A project folder, or a plan PDF given alone, stands for the whole project: the plan is the
+    PDF at the top of the folder, and the column shop drawings are the PDFs of the folders
+    named after columns under it, else every PDF named after columns.
+    """
+    first = Path(arguments[0]) if arguments else plan_columns.DEFAULT_PDF
+    if len(arguments) > 1:
+        return first, atelier_columns.atelier_pdfs(arguments[1:])
+    project = first if first.is_dir() else first.parent
+    plans = [first] if first.is_file() else sorted(project.glob("*.pdf"))
+    if len(plans) != 1:
+        sys.exit(f"{project}: expected one plan PDF at the top of the project folder, found {len(plans)}")
+    drawings = sorted(pdf for pdf in project.rglob("*.pdf") if pdf.parent != project)
+    columns = [pdf for pdf in drawings if "colon" in pdf.parent.name.lower()]
+    return plans[0], columns or [pdf for pdf in drawings if "colon" in pdf.name.lower()]
+
+
 def run(arguments):
     """Extract one project, given as on the command line. Returns the paths of the two JSON files."""
-    plan_pdf = Path(arguments[0]) if arguments else plan_columns.DEFAULT_PDF
-    pdfs = atelier_columns.atelier_pdfs(arguments[1:] or [atelier_columns.DEFAULT_ATELIER])
+    plan_pdf, pdfs = project_files(arguments)
     OUT_DIR.mkdir(exist_ok=True)
 
     plan_records, plan_report, links_by_page = plan_columns.extract(plan_pdf)
+    # Storey tables first; the drawings that hold none are read as one detail per column.
     atelier_records, atelier_report = atelier_columns.extract(pdfs, plan_pdf, check_dir=OUT_DIR)
+    tabled = {name for name, counts in atelier_report.items() if counts.get("records")}
+    details, details_report = atelier_details.extract([pdf for pdf in pdfs if pdf.name not in tabled], plan_pdf,
+                                                      check_dir=OUT_DIR)
+    atelier_records += details
+    for name, counts in details_report.items():
+        if counts["sheet"] is None:
+            print(f"{name}: left out, its name does not tell which storey it details")
     renamed = reconcile_names([link for links in links_by_page.values() for link in links], atelier_records)
     plan_columns.write_check(plan_pdf, links_by_page, OUT_DIR / f"{plan_pdf.stem}_colonnes_check.pdf")
 

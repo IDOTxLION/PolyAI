@@ -225,7 +225,7 @@ def extract(atelier_pdfs, plan_pdf, check_dir=None):
             if check_dir:
                 draw_check(page, drawn)
         report[Path(pdf_path).name] = dict(totals)
-        if check_dir:
+        if check_dir and totals["records"]:
             doc.save(Path(check_dir) / f"{Path(pdf_path).stem}_colonnes_check.pdf", garbage=3, deflate=True)
     report["repeated cells"] = dict(repeated)
     return list(by_id.values()), report

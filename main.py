@@ -1,11 +1,13 @@
 """Point d'entree : des PDF d'un projet au rapport PDF.
 
-Usage : python main.py [plan.pdf] [dossier ou PDF des dessins d'atelier]
+Usage : python main.py [dossier du projet]
+        python main.py plan.pdf [dossier ou PDF des dessins d'atelier]
         python main.py plan.json atelier.json
 
-La premiere forme extrait les elements du plan et des dessins d'atelier (JSON de
-l'annexe A, dans out/), les apparie, les compare et ecrit out/<projet>_rapport.pdf.
-La seconde repart de JSON deja extraits.
+Les deux premieres formes extraient les elements du plan et des dessins d'atelier (JSON
+de l'annexe A, dans out/), les apparient, les comparent et ecrivent out/<projet>_rapport.pdf.
+Un dossier de projet contient le PDF du plan a sa racine et les dessins d'atelier dans des
+sous-dossiers. La troisieme forme repart de JSON deja extraits.
 """
 
 import json
@@ -48,6 +50,8 @@ def main() -> None:
         atelier = charger(chemin_atelier)
         paires = Apparieur(plan + atelier).apparier()
         log.info("%s paires construites", len(paires))
+        if plan and atelier and not any(paire.statut == "paire" for paire in paires):
+            log.warning("aucun element du plan n'a de jumeau a l'atelier : les noms ne se correspondent pas")
         verdicts = Comparateur().comparer_paires(paires)
         comptes: dict[str, int] = {}
         for verdict in verdicts:
