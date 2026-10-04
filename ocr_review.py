@@ -6,8 +6,7 @@ Usage: python ocr_review.py path/to/file.pdf [page numbers, default 1]
 The first form reads each page with OCR and writes three files in out/review/:
   <pdf name>_p<page>_review.pdf        the drawing with a numbered box on every reading and what
                                        was read printed above it (blue = holds a digit, grey =
-                                       does not, red = a lone 1 not shaped like the digit), under
-                                       a lettered grid
+                                       does not), under a lettered grid
   <pdf name>_p<page>_readings.json     the readings and their numbers, kept so that a second run
                                        redraws the same numbers instead of reading the page again
   <pdf name>_p<page>_corrections.txt   to fill in by hand: the grid cells checked, and one line
@@ -36,15 +35,14 @@ from ocr_check import norm
 
 REVIEW_DIR = OUT_DIR / "review"
 CELL = 216  # points (3 in): the size aimed at for a grid cell, a few minutes of checking
-NUMERIC, PLAIN, DOUBTFUL, GRID = (0, 0.35, 0.9), (0.55, 0.55, 0.55), (0.85, 0, 0), (0.8, 0, 0.6)
+NUMERIC, PLAIN, GRID = (0, 0.35, 0.9), (0.55, 0.55, 0.55), (0.8, 0, 0.6)
 
-CORRECTION = re.compile(r"((?:#?\d+\s*,\s*)*#?\d+)\s*=\s*(.*)")  # "317 = 4 25M", or "12, 15 =" for several boxes
+CORRECTION = re.compile(r"#?(\d+)\s*=\s*(.*)")  # "317 = 4 25M": box 317 should read "4 25M"
 MISSED = re.compile(r"missed\s+([A-Z]\d+)\s*:\s*(.+)", re.IGNORECASE)  # "missed B4: 12 20M"
 
 TEMPLATE = """\
 # {fichier}, page {page}: OCR check by eye. Open {review} beside this file.
-# Every box has a number and, after it, what OCR read. Blue boxes hold a digit, grey ones do not,
-# and a red box is a lone 1 that is not shaped like the digit (often an arrow or a line).
+# Every box has a number and, after it, what OCR read. Blue boxes hold a digit, grey ones do not.
 # Each grid cell shows its name and the box numbers it holds, for example "B4  #212-231".
 #
 # 1. After "reviewed:", list the cells you checked from end to end (for example B4 B5 C4), or: all
@@ -53,10 +51,8 @@ reviewed:
 # 2. Below, one line per mistake found in those cells. Boxes that are right need no line.
 #      example: 317 = 4 25M 25M12-06   box #317 is misread: the whole text in that box is 4 25M 25M12-06
 #      example: 318 =                  box #318 sits on something that is not text
-#      example: 12, 15, 18 =           several boxes with the same correction, on one line
 #      example: missed B4: 12 20M      the drawing says 12 20M in cell B4 and no box is on it
 #    Only numbers are scored: a grey box needs a line only when the drawing has a number under it.
-#    Remarks are welcome on lines that start with "# ". Any other line stops the scoring.
 """
 
 
@@ -99,7 +95,7 @@ def draw_review(page, info):
         numbers.setdefault(reading["cell"], [reading["id"], reading["id"]])[1] = reading["id"]
         box = pymupdf.Rect(reading["x"] - reading["w"] / 2, reading["y"] - reading["h"] / 2,
                            reading["x"] + reading["w"] / 2, reading["y"] + reading["h"] / 2)
-        color = DOUBTFUL if reading.get("doubtful") else NUMERIC if has_digit(reading["text"]) else PLAIN
+        color = NUMERIC if has_digit(reading["text"]) else PLAIN
         shape.draw_rect(box * to_unrotated)
         shape.finish(color=color, width=0.4)
         letter_height = reading["w"] if reading.get("vertical") else reading["h"]
@@ -188,13 +184,11 @@ def parse_corrections(path, info):
             names = line[len("reviewed:"):].replace(",", " ").upper().split()
             reviewed |= cells if "ALL" in names else set(names)
         elif correction:
-            for number in re.findall(r"\d+", correction.group(1)):
-                corrections[int(number)] = correction.group(2)
+            corrections[int(correction.group(1))] = correction.group(2)
         elif miss:
             missed.append((miss.group(1).upper(), miss.group(2)))
         elif line and not line.startswith("#"):
-            sys.exit(f"{path}: line {line_number} is not understood. Write '317 = text', '12, 15 =', "
-                     f"'missed B4: text', or start the line with '# ' for a remark.")
+            sys.exit(f"{path}: line {line_number} is not understood")
 
     unknown = (reviewed | {cell for cell, _ in missed}) - cells
     if unknown:
