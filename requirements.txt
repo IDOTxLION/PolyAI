@@ -1,1 +1,8 @@
+pymupdf
+numpy
+pydantic
+rapidocr
+onnxruntime
 reportlab>=4.0
+# Optional: with a CUDA build of PyTorch installed, OCR runs on the GPU (about 10x faster).
+# torch

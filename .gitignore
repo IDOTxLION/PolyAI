@@ -1,3 +1,11 @@
 data/
-.venv/
+
+# extraction outputs (confidential plan content)
+output.txt
+page_*.png
 out/
+.venv/
+__pycache__/
+*.zip
+handoff/
+.DS_Store
